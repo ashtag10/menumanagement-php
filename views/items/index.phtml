@@ -1,0 +1,235 @@
+<?php 
+// Assurez-vous que les variables du contrôleur sont extraites dans votre render()
+// require __DIR__ . '/../layouts/header.phtml'; est supposé être inclus par la fonction render()
+// Sinon, incluez-le ici : require __DIR__ . '/../layouts/header.phtml'; 
+
+// FONCTION UTILITAIRE DE TRONCATION
+// Nous utilisons une fonction anonyme pour la rendre locale à la vue,
+// bien qu'il soit souvent préférable de la mettre dans le contrôleur ou une classe utilitaire.
+$truncate = function($text, $limit = 50) {
+    if (strlen($text) > $limit) {
+        // Tronque sans couper de mot brutalement
+        $text = substr($text, 0, $limit);
+        $text = substr($text, 0, strrpos($text, ' '));
+        return $text . '...';
+    }
+    return $text;
+};
+?>
+
+<h1 class="text-3xl font-bold mb-6">Liste des Items</h1>
+
+<!-- 1. Le lien "Ajouter" est remplacé par un bouton avec data-url -->
+<button 
+    id="open-create-modal"
+    class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-700 mb-4 inline-block"
+    data-url="/items/createPartial"
+>
+    Ajouter un Item
+</button>
+
+<div class="bg-white shadow-md rounded-lg overflow-hidden">
+    <table class="min-w-full leading-normal">
+        <thead class="bg-gray-200">
+            <tr>
+                <th class="px-5 py-3 border-b-2 text-left text-xs font-semibold uppercase">Nom</th>
+                <th class="px-5 py-3 border-b-2 text-left text-xs font-semibold uppercase">Description</th>
+                <th class="px-5 py-3 border-b-2 text-left text-xs font-semibold uppercase">Ingrédients</th>
+                <th class="px-5 py-3 border-b-2 text-center text-xs font-semibold uppercase">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php if (empty($items)): ?>
+                <tr class="hover:bg-gray-50">
+                    <td colspan="4" class="px-5 py-4 border-b text-center text-gray-500">
+                        Aucun item trouvé. Cliquez sur "Ajouter un Item" pour commencer.
+                    </td>
+                </tr>
+            <?php else: ?>
+                <?php foreach ($items as $item): ?>
+                <tr class="hover:bg-gray-50">
+                    <td class="px-5 py-4 border-b"><?= htmlspecialchars($item['name']) ?></td>
+                    
+                    <!-- Colonne Description TRONQUÉE -->
+                    <td class="px-5 py-4 border-b text-sm text-gray-600">
+                        <?= htmlspecialchars($truncate($item['description'], 80)) ?>
+                    </td>
+
+                    <!-- Colonne Ingrédients -->
+                    <td class="px-5 py-4 border-b text-sm">
+                        <?php 
+                        $ingredients = $item['ingredients'] ?? [];
+                        if (!empty($ingredients)): ?>
+                            <span class="text-gray-800 font-medium"><?= count($ingredients) ?></span> ingrédient(s)
+                            <ul class="text-xs text-gray-500 mt-1 space-y-0.5">
+                                <?php 
+                                // Afficher les 2 premiers ingrédients comme aperçu
+                                $previewIngredients = array_slice($ingredients, 0, 2);
+                                foreach ($previewIngredients as $ing): ?>
+                                    <li>- <?= htmlspecialchars($ing) ?></li>
+                                <?php endforeach; ?>
+                                <?php if (count($ingredients) > 2): ?>
+                                    <li class="font-semibold text-xs text-gray-700">(+ <?= count($ingredients) - 2 ?> autres)</li>
+                                <?php endif; ?>
+                            </ul>
+                        <?php else: ?>
+                            <span class="text-gray-400">Aucun</span>
+                        <?php endif; ?>
+                    </td>
+
+                    <td class="px-5 py-4 border-b text-sm text-center">
+                        <!-- 2. Le lien "Modifier" est remplacé par un bouton avec data-url -->
+                        <button 
+                            class="open-edit-modal text-indigo-600 hover:text-indigo-900 font-semibold"
+                            data-url="/items/editPartial/<?= $item['id'] ?>"
+                        >
+                            Modifier
+                        </button>
+                        <!-- Le lien de suppression reste statique -->
+                        <a href="/items/destroy/<?= $item['id'] ?>" class="text-red-600 hover:text-red-900 ml-4 font-semibold" onclick="return confirm('Êtes-vous sûr ?')">Supprimer</a>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+        </tbody>
+    </table>
+</div>
+
+<!-- 3. Structure de la Modale (Masquée par défaut) -->
+<div id="modal-backdrop" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-40"></div>
+<div id="item-modal" class="fixed inset-0 z-50 overflow-y-auto hidden">
+    <div class="flex items-center justify-center min-h-screen p-4">
+        <div class="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 relative">
+            <!-- Le contenu du formulaire (form.phtml) sera chargé ici -->
+            <div id="modal-content">
+                <p class="text-center text-gray-500">Chargement du formulaire...</p>
+            </div>
+            
+            <!-- Bouton de fermeture de la modale -->
+            <button id="close-modal" class="absolute top-3 right-3 text-gray-400 hover:text-gray-600">
+                <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- 4. Le code JavaScript pour l'interactivité -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const modal = document.getElementById('item-modal');
+        const backdrop = document.getElementById('modal-backdrop');
+        const modalContent = document.getElementById('modal-content');
+        const openCreateBtn = document.getElementById('open-create-modal');
+        const closeModalBtn = document.getElementById('close-modal');
+        const tableBody = document.querySelector('tbody'); 
+
+        // --- Fonctions de base de la Modale ---
+        
+        function openModal() {
+            modal.classList.remove('hidden');
+            backdrop.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+        }
+
+        function closeModal() {
+            modal.classList.add('hidden');
+            backdrop.classList.add('hidden');
+            document.body.style.overflow = '';
+            // Nettoie le contenu de la modale
+            modalContent.innerHTML = '<p class="text-center text-gray-500">Chargement du formulaire...</p>';
+        }
+
+        // Événements de fermeture
+        closeModalBtn.addEventListener('click', closeModal);
+        backdrop.addEventListener('click', closeModal);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+                closeModal();
+            }
+        });
+        
+        // --- Logique de chargement du formulaire (AJAX/Fetch) ---
+
+        async function loadForm(url) {
+            openModal();
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    throw new Error(`Erreur HTTP: ${response.status}`);
+                }
+                const html = await response.text();
+                modalContent.innerHTML = html;
+                
+                // Attacher l'événement de soumission après le chargement du formulaire
+                const form = modalContent.querySelector('form');
+                if (form) {
+                    form.addEventListener('submit', handleFormSubmit);
+                }
+                
+            } catch (error) {
+                console.error("Erreur de chargement du formulaire :", error);
+                modalContent.innerHTML = `<p class="text-red-500 text-center">Impossible de charger le formulaire. (${error.message})</p>`;
+            }
+        }
+
+        // Événement pour Créer un item
+        openCreateBtn.addEventListener('click', () => {
+            loadForm(openCreateBtn.dataset.url);
+        });
+
+        // Événement pour Modifier un item (délégation)
+        tableBody.addEventListener('click', (event) => {
+            const button = event.target.closest('.open-edit-modal');
+            if (button) {
+                loadForm(button.dataset.url);
+            }
+        });
+        
+        // --- Logique de Soumission du Formulaire (AJAX) ---
+        
+        async function handleFormSubmit(event) {
+            event.preventDefault(); 
+            
+            const form = event.target;
+            const url = form.action;
+            const formData = new FormData(form);
+            
+            const submitButton = form.querySelector('button[type="submit"]');
+            const originalButtonText = submitButton.textContent;
+            submitButton.textContent = 'Enregistrement...';
+            submitButton.disabled = true;
+
+            try {
+                // Soumettre les données de manière asynchrone
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                // Si la requête est OK (200, 201) ou si une redirection (302) est interceptée, on recharge.
+                if (response.ok || response.redirected) {
+                    closeModal();
+                    // Recharge la page pour mettre à jour la liste sans redirection PHP
+                    window.location.reload(); 
+                } else {
+                    // Si l'application renvoie des erreurs JSON, elles seraient gérées ici.
+                    alert(`Erreur lors de l'enregistrement. Code: ${response.status}`);
+                }
+                
+            } catch (error) {
+                console.error("Erreur de soumission :", error);
+                alert("Une erreur de réseau est survenue.");
+            } finally {
+                submitButton.textContent = originalButtonText;
+                submitButton.disabled = false;
+            }
+        }
+    });
+</script>
+
+<?php 
+// require __DIR__ . '/../layouts/footer.phtml'; est supposé être inclus par la fonction render()
+// Sinon, incluez-le ici : require __DIR__ . '/../layouts/footer.phtml'; 
+?>
