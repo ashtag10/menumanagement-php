@@ -9,9 +9,11 @@ WORKDIR /app
 RUN apk add --no-cache --virtual .build-deps \
         $PHPIZE_DEPS \
         postgresql-dev \
+    # Ajout du paquet client (RUNTIME) qui contient libpq.so.5, NÉCESSAIRE à l'exécution.
+    && apk add --no-cache postgresql-client \
     && docker-php-ext-install pdo pdo_pgsql \
+    # 2. Supprimer UNIQUEMENT les dépendances de compilation pour garder l'image légère.
     && apk del .build-deps
-
 
 # ÉTAPE CRUCIALE 1 : Copie des fichiers de configuration Composer en premier
 COPY composer.json composer.lock ./
